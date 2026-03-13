@@ -70,36 +70,42 @@ function mk(tag, props = {}, styles = {}) {
   return el;
 }
 
-// ── 改名 & 隐藏应用 ──────────────────────────────────────────────────────────
+// ── 改名 + 隐藏 + 标记（合并为一个函数，防递归）──────────────────────────────
 
-function applyRename(span) {
+const HIDE_EMOJI = '🙈 ';
+let _processing = false;
+
+function applyAll(span) {
+  if (_processing) return;
+  _processing = true;
+
   const id = extractId(span);
-  if (!id) return;
+  if (!id) { _processing = false; return; }
 
-  // 自动命名
+  // 自动命名：首次截取（去掉可能残留的 emoji 前缀再存）
   if (!store.read(AUTO_KEY, id) && !store.read(CUSTOM_KEY, id)) {
-    const text = span.textContent.trim().slice(0, AUTO_MAX);
-    if (text) store.set(AUTO_KEY, id, text);
+    const raw = span.textContent.replace(/^🙈\s*/, '').trim().slice(0, AUTO_MAX);
+    if (raw) store.set(AUTO_KEY, id, raw);
   }
 
   const name = getDisplayName(id);
-  if (name && span.textContent !== name) span.textContent = name;
+  const btn  = findRowBtn(span);
+  const hidden = isHidden(id);
 
-  const btn = findRowBtn(span);
-  if (btn && name && btn.title !== name) { btn.title = name; }
-}
+  // 可见性
+  if (btn) {
+    btn.style.display = (hidden && !showingHidden) ? 'none' : '';
+    btn.style.opacity = (hidden && showingHidden) ? '0.4' : '';
+  }
 
-/**
- * 安全隐藏：只修改 style.display，不动 DOM 结构
- * React 不在乎 inline style 变更，只在乎 DOM 子节点增删。
- */
-function applyVisibility(span) {
-  const id = extractId(span);
-  if (!id) return;
-  const btn = findRowBtn(span);
-  if (!btn) return;
-  const shouldHide = isHidden(id) && !showingHidden;
-  btn.style.display = shouldHide ? 'none' : '';
+  // 文字
+  if (name) {
+    const display = (hidden && showingHidden) ? HIDE_EMOJI + name : name;
+    if (span.textContent !== display) span.textContent = display;
+    if (btn && btn.title !== name) btn.title = name; // tooltip 始终干净名称
+  }
+
+  _processing = false;
 }
 
 // ── 改名弹框 ─────────────────────────────────────────────────────────────────
@@ -172,7 +178,7 @@ function setupDoubleClick() {
     const current = getDisplayName(id) || '';
     showRenameDialog(findRowBtn(span) || span, current, v => {
       store.set(CUSTOM_KEY, id, v.trim());
-      applyRename(span);
+      applyAll(span);
     });
   }, true);
 }
@@ -220,7 +226,7 @@ function injectHideOption(moreBtn) {
         moreBtn.click();
         // 刷新可见性
         setTimeout(() => {
-          document.querySelectorAll(PILL_SEL).forEach(applyVisibility);
+          document.querySelectorAll(PILL_SEL).forEach(applyAll);
           refreshBadge();
         }, 50);
       });
@@ -283,7 +289,7 @@ function refreshBadge() {
 
     badge.addEventListener('click', () => {
       showingHidden = !showingHidden;
-      document.querySelectorAll(PILL_SEL).forEach(applyVisibility);
+      document.querySelectorAll(PILL_SEL).forEach(applyAll);
       refreshBadge();
     });
 
@@ -326,7 +332,7 @@ function startObserver() {
         injectHideOption(m.target);
       }
     }
-    pills.forEach(s => { applyRename(s); applyVisibility(s); });
+    pills.forEach(applyAll);
     if (pills.size) refreshBadge();
   }).observe(document.body, {
     childList: true, subtree: true, characterData: true,
@@ -337,7 +343,7 @@ function startObserver() {
 // ── 初始化 ────────────────────────────────────────────────────────────────────
 
 function init() {
-  document.querySelectorAll(PILL_SEL).forEach(s => { applyRename(s); applyVisibility(s); });
+  document.querySelectorAll(PILL_SEL).forEach(applyAll);
   startObserver();
   setupDoubleClick();
   refreshBadge();
