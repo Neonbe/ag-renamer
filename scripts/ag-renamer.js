@@ -1,7 +1,7 @@
 /**
  * ag-renamer.js — Antigravity 会话自定义命名 v2.0.1
  * VERSION: 2.0.1
- * REPO: https://github.com/Neonbe/ag-renamer
+ * REPO: https://github.com/Neonbe/antigravity-convo-name-optimize
  *
  * 功能：
  * 1. 新会话首次出现时，自动截取前 20 个字符作为稳定名称（冻结）

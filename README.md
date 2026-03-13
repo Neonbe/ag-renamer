@@ -1,90 +1,124 @@
-# ag-renamer
+# antigravity-convo-name-optimize
 
-> Stop Antigravity from renaming your conversations. Right-click any conversation to set a permanent custom name.
+> Antigravity Agent Manager 会话管理增强补丁 — by [@neonbe](https://github.com/Neonbe)
 
-A patch for [Antigravity](https://antigravity.ai) Agent Manager that fixes two pain points:
+## 痛点
 
-1. **Names keep changing** — AI renames your conversations as they evolve. This patch freezes the name the moment a conversation first appears (first 20 characters), so it never changes again.
-2. **Names get cut off** — Hover over any conversation row to see the full name in a tooltip.
+Antigravity 的侧边栏有三个体验问题：
 
----
+1. **名字被 AI 改来改去** — 聊着聊着名字就变了，找不到之前的会话
+2. **名字显示不全** — 侧边栏宽度固定，长名称直接截断
+3. **会话太多太乱** — 几十个窗口堆在一起，分不清哪个是哪个
 
-## Features
+## 功能
 
-- 🔒 **Auto-freeze** — First time a conversation appears, its name is captured and locked
-- ✏️ **Right-click to rename** — Click any conversation row → type a custom name → Enter
-- 💾 **Persistent** — Names survive Antigravity restarts (stored in `localStorage`)
-- 🔄 **Update-safe** — Antigravity updates overwrite the patch, but your names are safe. Re-run the install to restore.
+| 功能 | 说明 |
+|------|------|
+| 🔒 **自动冻结** | 会话首次出现时截取前 20 字符，锁定不变 |
+| ✏️ **双击改名** | 双击会话行 → 弹框输入 → 支持中文 / Emoji / 任意语言 |
+| 🙈 **隐藏会话** | 点 ⋮ 菜单 → 隐藏会话 → 从列表移出 |
+| 👀 **查看已隐藏** | 侧边栏底部「已隐藏 (N)」角标 → 点击展开（🙈 + 半透明标记） |
+| 💬 **Hover 预览** | 鼠标悬停显示完整名称 tooltip |
+| 💾 **数据不丢** | 所有数据存在 localStorage，Antigravity 更新后修复即可恢复 |
 
-## Install
+## 安装
 
-### Option A — Via Antigravity SKILL (recommended)
+### 方式 A — 通过 Antigravity SKILL（推荐）
 
-Copy the `ag-renamer/` folder to your skills directory:
+1. 把 `SKILL.md` 和 `scripts/` 文件夹放到：
+   ```
+   ~/.gemini/antigravity/skills/antigravity-convo-name-optimize/
+   ```
+
+2. 在 Antigravity 中说：
+   ```
+   帮我安装 antigravity-convo-name-optimize
+   ```
+
+3. AI 自动完成注入，重启 Agent Manager 窗口即可。
+
+### 方式 B — 手动安装
 
 ```bash
-cp -r ag-renamer/ ~/.gemini/antigravity/skills/
-```
+APP_WORKBENCH="/Applications/Antigravity.app/Contents/Resources/app/out/vs/code/electron-browser/workbench"
 
-Then in Antigravity, say: **"帮我安装 ag-renamer"** or **"install ag-renamer"**
+# 1. 复制脚本
+curl -o "$APP_WORKBENCH/ag-renamer.js" \
+  https://raw.githubusercontent.com/Neonbe/antigravity-convo-name-optimize/main/scripts/ag-renamer.js
 
-The AI will handle everything automatically.
-
-### Option B — Manual
-
-```bash
-# 1. Copy the script
-cp scripts/ag-renamer.js \
-  "/Applications/Antigravity.app/Contents/Resources/app/out/vs/code/electron-browser/workbench/"
-
-# 2. Inject into HTML
-python3 - << 'EOF'
+# 2. 注入 HTML（在 jetskiAgent.js 后添加）
+python3 - "$APP_WORKBENCH/workbench-jetski-agent.html" << 'EOF'
 import sys
-html = "/Applications/Antigravity.app/Contents/Resources/app/out/vs/code/electron-browser/workbench/workbench-jetski-agent.html"
+html_path = sys.argv[1]
 ANCHOR = '<script src="./jetskiAgent.js" type="module"></script>'
-INJECT = ANCHOR + '\n<!-- ag-renamer -->\n<script src="./ag-renamer.js" type="module"></script>'
-with open(html) as f: c = f.read()
-if 'ag-renamer' not in c:
-    with open(html, 'w') as f: f.write(c.replace(ANCHOR, INJECT, 1))
-    print('✅ Done')
+INJECTION = ANCHOR + '\n<!-- ag-renamer -->\n<script src="./ag-renamer.js" type="module"></script>'
+with open(html_path, 'r') as f: content = f.read()
+if 'ag-renamer.js' in content: print('Already patched.')
+elif ANCHOR not in content: print('ERROR: anchor not found'); exit(1)
 else:
-    print('Already installed')
+    with open(html_path, 'w') as f: f.write(content.replace(ANCHOR, INJECTION, 1))
+    print('Patched!')
 EOF
 
-# 3. Clear macOS signature check
+# 3. 清除 macOS 隔离标记
 xattr -cr /Applications/Antigravity.app
 
-# 4. Restart Antigravity Agent Manager
+# 4. 重启 Agent Manager 窗口
 ```
 
-## Uninstall
+> ⚠️ macOS 首次重启后会弹出安全提示，点「仍然打开」即可。
 
-In Antigravity, say: **"卸载 ag-renamer"**
+## 卸载
 
-Or manually: delete `ag-renamer.js` from the workbench folder and remove its `<script>` tag from `workbench-jetski-agent.html`.
+```bash
+APP_WORKBENCH="/Applications/Antigravity.app/Contents/Resources/app/out/vs/code/electron-browser/workbench"
 
-## After Antigravity Updates
+rm -f "$APP_WORKBENCH/ag-renamer.js"
 
-Antigravity updates will overwrite the patch files. Your custom names are **not lost** (they live in `localStorage`). Just re-run the install and everything comes back.
+python3 - "$APP_WORKBENCH/workbench-jetski-agent.html" << 'EOF'
+import sys
+with open(sys.argv[1], 'r') as f: lines = f.readlines()
+cleaned = [l for l in lines if 'ag-renamer.js' not in l and '<!-- ag-renamer' not in l]
+with open(sys.argv[1], 'w') as f: f.writelines(cleaned)
+print(f'Removed {len(lines)-len(cleaned)} lines')
+EOF
+```
 
-## How it works
+清除数据（可选）：
+```javascript
+// 在 Agent Manager DevTools Console 中执行
+localStorage.removeItem('ag-custom-names');
+localStorage.removeItem('ag-auto-names');
+localStorage.removeItem('ag-hidden-ids');
+```
 
-The patch injects a small JavaScript file that:
-1. Uses a `MutationObserver` to watch for conversation items appearing in the sidebar
-2. On first sight, captures the current name (max 20 chars) into `localStorage`
-3. On every render, replaces the displayed text with the stored name
-4. Listens for `contextmenu` events on conversation rows to show the rename dialog
+## Antigravity 更新后
 
-Data is split into two `localStorage` keys:
-- `ag-auto-names` — auto-captured first-seen names
-- `ag-custom-names` — user-defined names (higher priority)
+每次 Antigravity 更新都会覆盖注入文件，但 **localStorage 里的数据不会丢失**。
 
-## DOM Compatibility
+修复方法：说「ag-renamer 修复」或重新执行安装步骤。
 
-Current DOM selector: `span[data-testid^="convo-pill-"]`
+## 技术细节
 
-If Antigravity updates break this, check the new selector and open an issue.
+- **注入方式**：`<script>` 标签注入到 `workbench-jetski-agent.html`
+- **DOM 选择器**：`span[data-testid^="convo-pill-"]`
+- **存储**：`localStorage`（`ag-auto-names` / `ag-custom-names` / `ag-hidden-ids`）
+- **React 安全**：所有注入 DOM 挂到 `document.body`（`position: fixed`），不碰 React 容器
+- **MutationObserver**：监听 `childList`、`characterData`、`aria-expanded` 属性变化
+
+## DOM 兼容性
+
+脚本依赖 `data-testid="convo-pill-*"` 选择器。如果 Antigravity 更新改变了 DOM 结构，可验证：
+
+```bash
+grep -q "convo-pill-" "/Applications/Antigravity.app/Contents/Resources/app/out/jetskiAgent/main.js" \
+  && echo "✅ 选择器有效" || echo "⚠️ 选择器可能失效"
+```
+
+## 反馈
+
+遇到问题？请提 [Issue](https://github.com/Neonbe/antigravity-convo-name-optimize/issues)
 
 ---
 
-Made for people who like to know what a conversation is about at a glance.
+Made with ☕ by [@neonbe](https://github.com/Neonbe)
