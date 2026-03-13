@@ -260,6 +260,28 @@ function findLatestListbox() {
 
 let showingHidden = false;
 
+/** 找到侧边栏底栏区域（Knowledge/Browser/Settings 所在容器）的位置 */
+function findBottomBarRect() {
+  // 策略：搜索包含 "Settings" 文本的元素，取其所在行的位置
+  const allSpans = document.querySelectorAll('span');
+  for (const s of allSpans) {
+    if (s.textContent.trim() === 'Settings') {
+      const row = s.closest('a, button, div[class]');
+      if (row) return row.getBoundingClientRect();
+    }
+  }
+  // 备选：找侧边栏最后一个 pill 的容器来推算底部
+  const firstPill = document.querySelector(PILL_SEL);
+  if (firstPill) {
+    const container = firstPill.closest('button')?.parentElement;
+    if (container) {
+      const r = container.getBoundingClientRect();
+      return { top: r.bottom - 32, right: r.right, left: r.left, bottom: r.bottom, width: r.width };
+    }
+  }
+  return null;
+}
+
 function refreshBadge() {
   const count = Object.keys(hiddenIds()).length;
   let badge = document.getElementById('ag-hidden-badge');
@@ -269,23 +291,22 @@ function refreshBadge() {
   if (!badge) {
     badge = mk('div', { id: 'ag-hidden-badge' }, {
       position: 'fixed',
-      bottom: '8px',
-      left: '8px',
       zIndex: '99998',
-      padding: '5px 12px',
-      background: C.bg,
-      border: `1px solid ${C.border}`,
-      borderRadius: '6px',
+      padding: '4px 10px',
+      background: 'transparent',
+      border: 'none',
+      borderRadius: '4px',
       color: C.textDimmed,
       fontSize: '11px',
       cursor: 'pointer',
       userSelect: 'none',
       fontFamily: 'system-ui, -apple-system, sans-serif',
-      boxShadow: '0 2px 8px rgba(0,0,0,.4)',
+      textAlign: 'right',
+      whiteSpace: 'nowrap',
     });
 
-    badge.addEventListener('mouseover', () => { badge.style.color = C.textMuted; });
-    badge.addEventListener('mouseout',  () => { badge.style.color = C.textDimmed; });
+    badge.addEventListener('mouseover', () => { badge.style.color = C.textMuted; badge.style.background = C.bgHover; });
+    badge.addEventListener('mouseout',  () => { badge.style.color = C.textDimmed; badge.style.background = 'transparent'; });
 
     badge.addEventListener('click', () => {
       showingHidden = !showingHidden;
@@ -293,20 +314,28 @@ function refreshBadge() {
       refreshBadge();
     });
 
-    document.body.appendChild(badge);   // ← body，安全
+    document.body.appendChild(badge);
   }
 
-  // 动态计算左边位置：跟侧边栏对齐
-  const firstPill = document.querySelector(PILL_SEL);
-  if (firstPill) {
-    const pillRect = firstPill.getBoundingClientRect();
-    badge.style.left = `${Math.max(8, pillRect.left)}px`;
-    badge.style.width = `${Math.max(pillRect.width, 100)}px`;
+  // 动态吸附：底栏右侧
+  const barRect = findBottomBarRect();
+  if (barRect) {
+    badge.style.top  = `${barRect.top + 2}px`;
+    badge.style.left = 'auto';
+    badge.style.right = `${window.innerWidth - barRect.right + 8}px`;
+    badge.style.bottom = 'auto';
+  } else {
+    // 兜底：右下角
+    badge.style.bottom = '8px';
+    badge.style.right  = '8px';
+    badge.style.top    = 'auto';
+    badge.style.left   = 'auto';
   }
+  badge.style.width = 'auto';
 
   badge.textContent = showingHidden
     ? `▲ 收起隐藏 (${count})`
-    : `▼ 已隐藏 (${count})`;
+    : `已隐藏 (${count})`;
 }
 
 // ── MutationObserver ──────────────────────────────────────────────────────────
