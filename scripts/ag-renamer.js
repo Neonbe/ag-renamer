@@ -1,29 +1,27 @@
 /**
- * ag-renamer.js — Antigravity 会话自定义命名 v2.0.1
- * VERSION: 2.0.1
+ * ag-renamer.js — Antigravity 会话管理增强 v2.1.0
+ * VERSION: 2.1.0
  * REPO: https://github.com/Neonbe/antigravity-convo-name-optimize
  *
  * 功能：
  * 1. 新会话首次出现时，自动截取前 20 个字符作为稳定名称（冻结）
  * 2. 双击会话行 → 弹出改名小框
- * 3. more_vert 下拉菜单注入「隐藏」选项
- * 4. 底部悬浮「已隐藏 (N)」角标，点击可展开/折叠
- *
- * ⚠️ v2.0.0 崩溃修复：
- *    所有注入节点挂到 document.body (fixed 定位)，
- *    绝不 appendChild 进 React 管理的容器，避免 reconciliation crash。
+ * 3. ⋮ 菜单注入「隐藏会话」「标记为待阅读」
+ * 4. 🔖 待阅读标记，时间戳变化后自动清除
+ * 5. 🙈 隐藏标记 + 底部角标
  *
  * SELECTOR: span[data-testid^="convo-pill-"]
  */
 
 // ── 常量 ──────────────────────────────────────────────────────────────────────
 
-const AUTO_KEY   = 'ag-auto-names';
-const CUSTOM_KEY = 'ag-custom-names';
-const HIDDEN_KEY = 'ag-hidden-ids';
-const AUTO_MAX   = 20;
-const PILL_SEL   = 'span[data-testid^="convo-pill-"]';
-const MOREV_SEL  = 'button[aria-haspopup="listbox"]';
+const AUTO_KEY    = 'ag-auto-names';
+const CUSTOM_KEY  = 'ag-custom-names';
+const HIDDEN_KEY  = 'ag-hidden-ids';
+const PENDING_KEY = 'ag-pending-ids';   // { convId: "3h" } 标记时的时间戳文字
+const AUTO_MAX    = 20;
+const PILL_SEL    = 'span[data-testid^="convo-pill-"]';
+const MOREV_SEL   = 'button[aria-haspopup="listbox"]';
 
 // 颜色
 const C = {
@@ -49,6 +47,11 @@ const hiddenIds  = ()  => store.get(HIDDEN_KEY);
 const isHidden   = id  => !!store.read(HIDDEN_KEY, id);
 const setHidden  = (id, v) => store.set(HIDDEN_KEY, id, v || null);
 
+const isPending  = id  => !!store.read(PENDING_KEY, id);
+const setPending = (id, ts) => store.set(PENDING_KEY, id, ts || null);
+const getPendingTs = id => store.read(PENDING_KEY, id);
+const allPending = () => store.get(PENDING_KEY);
+
 // ── DOM 工具 ──────────────────────────────────────────────────────────────────
 
 const extractId = el => {
@@ -63,6 +66,18 @@ const findPillIn  = el => {
   return el.querySelector?.(PILL_SEL) || el.closest?.('button')?.querySelector?.(PILL_SEL) || null;
 };
 
+/** 找到会话行的时间戳文字（如 "3h", "14h", "1d", "now"） */
+function findTimestampText(btn) {
+  if (!btn) return null;
+  // 时间戳通常在 pill span 之后的兄弟区域，匹配常见格式
+  const allText = btn.querySelectorAll('span, div');
+  for (const el of allText) {
+    const t = el.textContent.trim();
+    if (/^(now|\d+\s*(s|sec|secs|m|min|mins|h|d|w|mo|y)\s*(ago)?)$/i.test(t)) return t;
+  }
+  return null;
+}
+
 function mk(tag, props = {}, styles = {}) {
   const el = document.createElement(tag);
   Object.assign(el, props);
@@ -70,9 +85,10 @@ function mk(tag, props = {}, styles = {}) {
   return el;
 }
 
-// ── 改名 + 隐藏 + 标记（合并为一个函数，防递归）──────────────────────────────
+// ── 改名 + 隐藏 + 待阅读（合并为一个函数，防递归）─────────────────────────────
 
 const HIDE_EMOJI = '🙈 ';
+const PEND_EMOJI = '🔖 ';
 let _processing = false;
 
 function applyAll(span) {
@@ -84,13 +100,14 @@ function applyAll(span) {
 
   // 自动命名：首次截取（去掉可能残留的 emoji 前缀再存）
   if (!store.read(AUTO_KEY, id) && !store.read(CUSTOM_KEY, id)) {
-    const raw = span.textContent.replace(/^🙈\s*/, '').trim().slice(0, AUTO_MAX);
+    const raw = span.textContent.replace(/^[🙈🔖]\s*/, '').trim().slice(0, AUTO_MAX);
     if (raw) store.set(AUTO_KEY, id, raw);
   }
 
-  const name = getDisplayName(id);
-  const btn  = findRowBtn(span);
-  const hidden = isHidden(id);
+  const name    = getDisplayName(id);
+  const btn     = findRowBtn(span);
+  const hidden  = isHidden(id);
+  const pending = isPending(id);
 
   // 可见性
   if (btn) {
@@ -98,11 +115,13 @@ function applyAll(span) {
     btn.style.opacity = (hidden && showingHidden) ? '0.4' : '';
   }
 
-  // 文字
+  // 文字：优先级 隐藏 > 待阅读 > 正常
   if (name) {
-    const display = (hidden && showingHidden) ? HIDE_EMOJI + name : name;
+    let display = name;
+    if (hidden && showingHidden) display = HIDE_EMOJI + name;
+    else if (pending)            display = PEND_EMOJI + name;
     if (span.textContent !== display) span.textContent = display;
-    if (btn && btn.title !== name) btn.title = name; // tooltip 始终干净名称
+    if (btn && btn.title !== name) btn.title = name;
   }
 
   _processing = false;
@@ -183,12 +202,11 @@ function setupDoubleClick() {
   }, true);
 }
 
-// ── 下拉菜单注入「隐藏」── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ──
+// ── 下拉菜单注入「隐藏」+「待阅读」── ── ── ── ── ── ── ── ── ── ── ── ── ──
 // React 的 portal listbox 是临时 DOM，React 销毁后重建，
 // 我们每次展开都重新注入，不留持久化节点，安全。
 
-function injectHideOption(moreBtn) {
-  // 往上走找到同一行的 convo-pill
+function injectMenuOptions(moreBtn) {
   const span = findPillViaAncestry(moreBtn);
   if (!span) return;
   const id = extractId(span);
@@ -200,41 +218,63 @@ function injectHideOption(moreBtn) {
       if (!listbox || listbox.dataset.agDone) return;
       listbox.dataset.agDone = '1';
 
-      const hidden = isHidden(id);
+      const hidden  = isHidden(id);
+      const pending = isPending(id);
+      const btn     = findRowBtn(span);
 
       // 分隔线
-      const sep = mk('div', {}, {
+      listbox.appendChild(mk('div', {}, {
         height: '1px', background: C.border, margin: '4px 0',
-      });
+      }));
 
-      // 隐藏/取消隐藏 选项
-      const opt = mk('div', {
-        textContent: hidden ? '取消隐藏' : '隐藏会话',
-        role: 'option',
-      }, {
-        padding: '6px 16px', fontSize: '13px', color: C.textMuted,
-        cursor: 'pointer', userSelect: 'none',
-      });
-      opt.addEventListener('mouseover', () => { opt.style.background = C.bgHover; opt.style.color = C.text; });
-      opt.addEventListener('mouseout',  () => { opt.style.background = ''; opt.style.color = C.textMuted; });
-      opt.addEventListener('mousedown', e => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (hidden) { setHidden(id, null); }
-        else        { setHidden(id, true); }
-        // 关闭下拉
-        moreBtn.click();
-        // 刷新可见性
-        setTimeout(() => {
-          document.querySelectorAll(PILL_SEL).forEach(applyAll);
-          refreshBadge();
-        }, 50);
-      });
+      // ── 待阅读选项 ──
+      const pendOpt = mkMenuOption(
+        pending ? '取消待阅读' : '🔖 标记为待阅读',
+        () => {
+          if (pending) {
+            setPending(id, null);
+          } else {
+            const ts = findTimestampText(btn) || 'now';
+            setPending(id, ts);
+          }
+          moreBtn.click();
+          setTimeout(() => document.querySelectorAll(PILL_SEL).forEach(applyAll), 50);
+        }
+      );
+      listbox.appendChild(pendOpt);
 
-      listbox.appendChild(sep);
-      listbox.appendChild(opt);
+      // ── 隐藏选项 ──
+      const hideOpt = mkMenuOption(
+        hidden ? '取消隐藏' : '🙈 隐藏会话',
+        () => {
+          if (hidden) setHidden(id, null);
+          else        setHidden(id, true);
+          moreBtn.click();
+          setTimeout(() => {
+            document.querySelectorAll(PILL_SEL).forEach(applyAll);
+            refreshBadge();
+          }, 50);
+        }
+      );
+      listbox.appendChild(hideOpt);
     }, 30);
   });
+}
+
+/** 创建一个菜单选项 DOM */
+function mkMenuOption(text, onClick) {
+  const opt = mk('div', { textContent: text, role: 'option' }, {
+    padding: '6px 16px', fontSize: '13px', color: C.textMuted,
+    cursor: 'pointer', userSelect: 'none',
+  });
+  opt.addEventListener('mouseover', () => { opt.style.background = C.bgHover; opt.style.color = C.text; });
+  opt.addEventListener('mouseout',  () => { opt.style.background = ''; opt.style.color = C.textMuted; });
+  opt.addEventListener('mousedown', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    onClick();
+  });
+  return opt;
 }
 
 function findPillViaAncestry(el) {
@@ -340,6 +380,28 @@ function refreshBadge() {
     : `已隐藏 (${count})`;
 }
 
+// ── 待阅读：时间戳变化检测 ────────────────────────────────────────────────────
+
+/** 扫描所有待阅读会话，如果时间戳跟标记时不同，自动清除 */
+function checkPendingTimestamps() {
+  const pending = allPending();
+  const ids = Object.keys(pending);
+  if (!ids.length) return;
+
+  document.querySelectorAll(PILL_SEL).forEach(span => {
+    const id = extractId(span);
+    if (!id || !pending[id]) return;
+    const btn = findRowBtn(span);
+    const currentTs = findTimestampText(btn);
+    if (currentTs && currentTs !== pending[id]) {
+      // 时间戳变了 → 有新活动 → 自动清除待阅读
+      setPending(id, null);
+      applyAll(span);
+      console.log(`[ag-renamer] 🔖 自动清除待阅读: ${id} (${pending[id]} → ${currentTs})`);
+    }
+  });
+}
+
 // ── MutationObserver ──────────────────────────────────────────────────────────
 
 function startObserver() {
@@ -360,11 +422,14 @@ function startObserver() {
           && m.attributeName === 'aria-expanded'
           && m.target.getAttribute('aria-expanded') === 'true'
           && m.target.matches?.(MOREV_SEL)) {
-        injectHideOption(m.target);
+        injectMenuOptions(m.target);
       }
     }
     pills.forEach(applyAll);
-    if (pills.size) refreshBadge();
+    if (pills.size) {
+      refreshBadge();
+      checkPendingTimestamps();
+    }
   }).observe(document.body, {
     childList: true, subtree: true, characterData: true,
     attributes: true, attributeFilter: ['aria-expanded'],
@@ -378,7 +443,10 @@ function init() {
   startObserver();
   setupDoubleClick();
   refreshBadge();
-  console.log('[ag-renamer] ✅ v2.0.1 运行中 — 双击改名 | ⋮ 可隐藏');
+  checkPendingTimestamps();
+  // 定时检查待阅读（时间戳可能被 React 定时刷新覆盖）
+  setInterval(checkPendingTimestamps, 5000);
+  console.log('[ag-renamer] ✅ v2.1.0 运行中 — 双击改名 | ⋮ 隐藏/待阅读');
 }
 
 setTimeout(init, 800);
